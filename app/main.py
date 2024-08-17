@@ -90,8 +90,9 @@ class ExecuteFunctionAfterXMilliSeconds:
         print('started timer', milliseconds)
 
 class RedisServer:
-    def __init__(self, host: str, port: int):
+    def __init__(self, host: str, port: int, replica = None):
         self.server_socket = socket.create_server((host, port))
+        self.replica = replica
 
     def start(self ):
         while True:
@@ -146,7 +147,8 @@ class RedisServer:
                 response = None
 
         if command == 'info':
-            response = "role:master"
+            _type = 'slave' if self.replica is not None else 'master'
+            response = f"role:{_type}"
 
         return response
 
@@ -171,21 +173,24 @@ class RedisServer:
 
 class HandleCliParams:
     @staticmethod
-    def execute() -> int | None:
+    def execute() -> dict[str, str | int | None]:
         import argparse
         parser = argparse.ArgumentParser(description='Get CLI params')
 
         # Add arguments
         parser.add_argument('--port', type=int, help='Server port')
+        parser.add_argument('--replicaof', type=str, help='Replica flag')
 
         # Parse the arguments
         args = parser.parse_args()
-
-        return args.port or None
+        return dict(port=args.port or None, replica=args.replicaof or None)
 
 def main():
-    port = HandleCliParams().execute() or 6379
-    RedisServer(host='localhost', port=port).start()
+    cli_params = HandleCliParams().execute()
+    port = cli_params['port'] or 6379
+    replica = cli_params['replica']
+
+    RedisServer(host='localhost', port=port, replica=replica).start()
 
 if __name__ == "__main__":
     main()
