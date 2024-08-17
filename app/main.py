@@ -7,7 +7,6 @@ from enum import Enum
 ARRAY_IDENTIFIER: str = '*'
 SIMPLE_STRING_IDENTIFIER: str = '+'
 BULK_STRING_IDENTIFIER: str = '$'
-PONG = "+PONG\r\n".encode("utf-8")
 
 class RESPIdentifier(Enum):
     ARRAY: str = '*'
@@ -51,11 +50,14 @@ class RESPEncoder:
     @staticmethod
     def encode(value: str) -> bytes:
         if isinstance(value, str) and len(value) <= 4:
-            print('caiu no encode de string 4', "{SIMPLE_STRING_IDENTIFIER}\r\n".encode("utf-8"))
             return f"{SIMPLE_STRING_IDENTIFIER}{value}\r\n".encode("utf-8")
 
         if isinstance(value, str):
             return f"{BULK_STRING_IDENTIFIER}{len(value)}\r\n{value}\r\n".encode("utf-8")
+
+        if type(value) is None:
+            return f"{BULK_STRING_IDENTIFIER}-1\r\n"
+
         return b''
 
 class Store:
@@ -77,6 +79,9 @@ class RedisServer:
         while True:
             conn, _ = self.server_socket.accept()
             threading.Thread(target=self._handle_client, args=(conn,)).start()
+
+    def _get_payload_params(self, payload: list[str]):
+
 
     def _get_response(self, command: str, payload: [str, None] = None) -> str:
         response = ''
@@ -121,12 +126,6 @@ class RedisServer:
 
 
 def main():
-    # Uncomment this to pass the first stage
-    #server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
-
-    #while True:
-       # conn, address = server_socket.accept()
-       # threading.Thread(target=wait_for_messages, args=(conn, address)).start()
     RedisServer(host='localhost', port=6379).start()
 
 if __name__ == "__main__":
