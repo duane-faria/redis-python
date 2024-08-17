@@ -2,7 +2,6 @@
 import socket
 import threading
 from enum import Enum
-from typing import Callable
 
 # constants
 ARRAY_IDENTIFIER: str = '*'
@@ -92,7 +91,7 @@ class ExecuteFunctionAfterXMilliSeconds:
 
 class RedisServer:
     def __init__(self, host: str, port: int):
-        self.server_socket = socket.create_server((host, port), reuse_port=True)
+        self.server_socket = socket.create_server((host, port))
 
     def start(self ):
         while True:
@@ -166,9 +165,23 @@ class RedisServer:
                 conn.send(RESPEncoder.encode(response))
 
 
+class HandleCliParams:
+    @staticmethod
+    def execute() -> int | None:
+        import argparse
+        parser = argparse.ArgumentParser(description='Get CLI params')
+
+        # Add arguments
+        parser.add_argument('--port', type=int, help='Server port')
+
+        # Parse the arguments
+        args = parser.parse_args()
+
+        return args.port or None
 
 def main():
-    RedisServer(host='localhost', port=6379).start()
+    port = HandleCliParams().execute() or 6379
+    RedisServer(host='localhost', port=port).start()
 
 if __name__ == "__main__":
     main()
