@@ -52,7 +52,7 @@ class RESPEncoder:
 
     @staticmethod
     def encode(value: str | None) -> bytes:
-        print('RESPEncoder', value)
+
         if isinstance(value, str) and len(value) <= 4:
             return f"{SIMPLE_STRING_IDENTIFIER}{value}\r\n".encode("utf-8")
 
@@ -129,9 +129,10 @@ class RedisServer:
         if command == 'set':
             key = payload[0]
             value = payload[1]
+
             Store.set_value(key, value)
             params = self._get_payload_params(payload)
-            print(params, 'params')
+
             if len(params) > 0:
                 self._apply_params(params=params, payload=payload, command=command)
 
@@ -144,6 +145,9 @@ class RedisServer:
             except KeyError:
                 response = None
 
+        if command == 'info':
+            response = "role:master"
+
         return response
 
     def _parse_payload(self, payload: list):
@@ -155,13 +159,13 @@ class RedisServer:
                 encoded_message = conn.recv(1024)
 
                 command_and_payload = RESPParser(encoded_message.decode('utf-8')).parse()
-                print('command and payload', command_and_payload)
+
                 command = list(command_and_payload[0])[1].lower()
                 payload = self._parse_payload(command_and_payload[1:]) or None
-
+                print('command', command)
+                print('payload', payload)
                 response = self._get_response(command, payload)
-                print(response, 'response')
-                print('encoded response: ', RESPEncoder.encode(response))
+
                 conn.send(RESPEncoder.encode(response))
 
 
