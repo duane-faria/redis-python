@@ -2,11 +2,15 @@
 import socket
 import threading
 from enum import Enum
+from typing import Callable
 
 # constants
 ARRAY_IDENTIFIER: str = '*'
 SIMPLE_STRING_IDENTIFIER: str = '+'
 BULK_STRING_IDENTIFIER: str = '$'
+
+class Params(Enum):
+    PX = 'px' # expiry in milliseconds
 
 class RESPIdentifier(Enum):
     ARRAY: str = '*'
@@ -48,15 +52,16 @@ class RESPEncoder:
         pass
 
     @staticmethod
-    def encode(value: str) -> bytes:
+    def encode(value: str | None) -> bytes:
+        print('RESPEncoder', value)
         if isinstance(value, str) and len(value) <= 4:
             return f"{SIMPLE_STRING_IDENTIFIER}{value}\r\n".encode("utf-8")
 
         if isinstance(value, str):
             return f"{BULK_STRING_IDENTIFIER}{len(value)}\r\n{value}\r\n".encode("utf-8")
 
-        if type(value) is None:
-            return f"{BULK_STRING_IDENTIFIER}-1\r\n"
+        if value is None:
+            return f"{BULK_STRING_IDENTIFIER}-1\r\n".encode("utf-8")
 
         return b''
 
@@ -71,6 +76,20 @@ class Store:
   def get_value(key):
     return Store.data[key]
 
+  @staticmethod
+  def delete_value(key):
+    del Store.data[key]
+
+class ExecuteFunctionAfterXMilliSeconds:
+    @staticmethod
+    def execute(milliseconds: int, function):
+        delay_in_seconds = milliseconds / 1000
+
+        timer = threading.Timer(delay_in_seconds, function)
+
+        timer.start()
+        print('started timer', milliseconds)
+
 class RedisServer:
     def __init__(self, host: str, port: int):
         self.server_socket = socket.create_server((host, port), reuse_port=True)
@@ -81,7 +100,23 @@ class RedisServer:
             threading.Thread(target=self._handle_client, args=(conn,)).start()
 
     def _get_payload_params(self, payload: list[str]):
+        params = {}
 
+        if Params.PX.value in payload:
+           index = payload.index(Params.PX.value)
+           value = payload[index + 1]
+           params[Params.PX.value] = value
+
+        return params
+
+    def _apply_params(self, params: [Params, str], command: str, payload: list[str]):
+        if Params.PX.value in params:
+            if command == 'set':
+                key_value = payload[0]
+
+                remove_item = lambda: Store.delete_value(key_value)
+
+                ExecuteFunctionAfterXMilliSeconds.execute(milliseconds=int(params[Params.PX.value]), function=remove_item)
 
     def _get_response(self, command: str, payload: [str, None] = None) -> str:
         response = ''
@@ -91,17 +126,24 @@ class RedisServer:
 
         if command == 'echo':
             response = payload[0]
-            #response = RESPEncoder.encode(payload)
 
         if command == 'set':
             key = payload[0]
             value = payload[1]
             Store.set_value(key, value)
+            params = self._get_payload_params(payload)
+            print(params, 'params')
+            if len(params) > 0:
+                self._apply_params(params=params, payload=payload, command=command)
+
             response = 'OK'
 
         if command == 'get':
             key = payload[0]
-            response = Store.get_value(key)
+            try:
+                response = Store.get_value(key)
+            except KeyError:
+                response = None
 
         return response
 
@@ -120,8 +162,8 @@ class RedisServer:
 
                 response = self._get_response(command, payload)
                 print(response, 'response')
+                print('encoded response: ', RESPEncoder.encode(response))
                 conn.send(RESPEncoder.encode(response))
-
 
 
 
