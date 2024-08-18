@@ -1,12 +1,14 @@
 # Uncomment this to pass the first stage
 import socket
 import threading
+from collections.abc import Buffer
 from enum import Enum
 
 # constants
 ARRAY_IDENTIFIER: str = '*'
 SIMPLE_STRING_IDENTIFIER: str = '+'
 BULK_STRING_IDENTIFIER: str = '$'
+ENCODING_DIVIDER="\r\n"
 
 class Params(Enum):
     PX = 'px' # expiry in milliseconds
@@ -57,12 +59,17 @@ class RESPEncoder:
             return f"{SIMPLE_STRING_IDENTIFIER}{value}\r\n".encode("utf-8")
 
         if isinstance(value, str):
-            return f"{BULK_STRING_IDENTIFIER}{len(value)}\r\n{value}\r\n".encode("utf-8")
+            return RESPEncoder.bulk_string_encode(value)
 
         if value is None:
             return f"{BULK_STRING_IDENTIFIER}-1\r\n".encode("utf-8")
 
         return b''
+
+    @staticmethod
+    def bulk_string_encode(value: str | list):
+        length = len(value.encode("utf-8"))
+        return f"{BULK_STRING_IDENTIFIER}{length}\r\n{value}\r\n".encode("utf-8")
 
 class Store:
   data = {}
@@ -119,7 +126,7 @@ class RedisServer:
                 ExecuteFunctionAfterXMilliSeconds.execute(milliseconds=int(params[Params.PX.value]), function=remove_item)
 
     def _get_response(self, command: str, payload: [str, None] = None) -> str:
-        response = ''
+        response: None | bytes | str | Buffer = ''
 
         if command == 'ping':
             response = "PONG"
@@ -148,7 +155,17 @@ class RedisServer:
 
         if command == 'info':
             _type = 'slave' if self.replica is not None else 'master'
-            response = f"role:{_type}"
+            replication_id = GenerateRandomString(length=40).execute()
+            role_type = f"role:{_type}"
+
+            string_list = [role_type, f"master_replid:{replication_id}", "master_repl_offset:0"]
+
+            if _type == 'master':
+                response = RESPEncoder.bulk_string_encode("\r\n".join(string_list))
+            else:
+                response = RESPEncoder.bulk_string_encode(role_type)
+
+            print(response)
 
         return response
 
@@ -166,10 +183,23 @@ class RedisServer:
                 payload = self._parse_payload(command_and_payload[1:]) or None
                 print('command', command)
                 print('payload', payload)
+
                 response = self._get_response(command, payload)
+                response = response if isinstance(response, bytes) else RESPEncoder.encode(response)
+                conn.send(response)
 
-                conn.send(RESPEncoder.encode(response))
 
+class GenerateRandomString:
+    def __init__(self, length):
+        self.length = length
+
+    def execute(self):
+        import random
+        import string
+
+        characters = string.ascii_letters + string.digits
+
+        return ''.join(random.choice(characters) for _ in range(self.length))
 
 class HandleCliParams:
     @staticmethod
@@ -183,14 +213,16 @@ class HandleCliParams:
 
         # Parse the arguments
         args = parser.parse_args()
+        print('args: ',args)
         return dict(port=args.port or None, replica=args.replicaof or None)
 
 def main():
     cli_params = HandleCliParams().execute()
     port = cli_params['port'] or 6379
-    replica = cli_params['replica']
-
+    replica = cli_params['replica'] # it means the redis server is a slave if filled
+    print('port', port, 'replica', replica)
     RedisServer(host='localhost', port=port, replica=replica).start()
 
 if __name__ == "__main__":
     main()
+
