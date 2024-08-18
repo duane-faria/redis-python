@@ -73,12 +73,20 @@ class RESPEncoder:
         return f"{BULK_STRING_IDENTIFIER}{length}\r\n{value}\r\n".encode("utf-8")
 
     @staticmethod
-    def array_encode(value: str | list):
+    def array_encode(value: str | list[str]):
         if isinstance(value, str):
             array_length = 1
-            return f"{ARRAY_IDENTIFIER}{array_length}{ENCODING_DIVIDER}${len(value)}{ENCODING_DIVIDER}{value}{ENCODING_DIVIDER}".encode("utf-8")
+            return f"{ARRAY_IDENTIFIER}{array_length}{ENCODING_DIVIDER}{BULK_STRING_IDENTIFIER}{len(value)}{ENCODING_DIVIDER}{value}{ENCODING_DIVIDER}".encode("utf-8")
+
         if isinstance(value, list):
-            pass
+            array_length = len(value)
+            items = []
+
+            for item in value:
+                items.append(f'{BULK_STRING_IDENTIFIER}{len(item)}')
+                items.append(item)
+
+            return f"{ARRAY_IDENTIFIER}{array_length}{ENCODING_DIVIDER}{ENCODING_DIVIDER.join(items)}{ENCODING_DIVIDER}".encode("utf-8")
 
 class Store:
   data = {}
@@ -107,22 +115,46 @@ class ExecuteFunctionAfterXMilliSeconds:
 
 class RedisServer:
     def __init__(self, host: str, port: int, replica = None):
+        self.port = port
+        self.host = host
         self.server_socket = socket.create_server((host, port))
-        self.replica = replica
-        self.is_replica = self.replica is not None
-        if self.is_replica:
-            self.hand_shake()
+        self.master = {
+            'host': replica.split()[0],
+            'port': replica.split()[1]
+        } if replica is not None else None
+        self.is_replica = self.master is not None
 
-    def hand_shake(self):
-        # sends a message to the master
-        host, port = self.replica.split()
-        connection = socket.create_connection((host,port))
-        connection.sendall(RESPEncoder.array_encode('PING'))
+        if self.is_replica:
+            self.master_socket_connection = socket.create_connection((self.master['host'], self.master['port']))
+            self.send_hand_shake()
 
     def start(self ):
         while True:
             conn, _ = self.server_socket.accept()
             threading.Thread(target=self._handle_client, args=(conn,)).start()
+
+    def send_hand_shake(self):
+        # sends messages to the master to configure the replica
+        self.master_socket_connection.sendall(RESPEncoder.array_encode('PING'))
+        self.master_socket_connection.recv(1024)
+        self.master_socket_connection.sendall(RESPEncoder.array_encode(['REPLCONF', 'listening-port', str(self.port)]))
+        self.master_socket_connection.recv(1024)
+        self.master_socket_connection.sendall(RESPEncoder.array_encode(['REPLCONF', 'capa', 'psync2']))
+
+
+    def _handle_master_socket_messages(self, connection):
+        with connection:
+            while True:
+                encoded_message = connection.recv(1024)
+
+                RESPParser(encoded_message.decode('utf-8')).parse()
+
+    def master_socket_listener(self):
+        #while True:
+        connection, _ = self.master_socket_connection.accept()
+        threading.Thread(target=self._handle_master_socket_messages, args=(connection,)).start()
+
+
 
     def _get_payload_params(self, payload: list[str]):
         params = {}
@@ -172,7 +204,7 @@ class RedisServer:
                 response = None
 
         if command == 'info':
-            _type = 'slave' if self.replica is not None else 'master'
+            _type = 'slave' if self.master is not None else 'master'
             replication_id = GenerateRandomString(length=40).execute()
             role_type = f"role:{_type}"
 
