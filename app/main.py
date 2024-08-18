@@ -57,7 +57,7 @@ class RESPEncoder:
     def encode(value: str | None) -> bytes:
 
         if isinstance(value, str) and len(value) <= 4:
-            return f"{SIMPLE_STRING_IDENTIFIER}{value}\r\n".encode("utf-8")
+           return RESPEncoder.simple_string_encode(value)
 
         if isinstance(value, str):
             return RESPEncoder.bulk_string_encode(value)
@@ -71,6 +71,10 @@ class RESPEncoder:
     def bulk_string_encode(value: str | list):
         length = len(value.encode("utf-8"))
         return f"{BULK_STRING_IDENTIFIER}{length}\r\n{value}\r\n".encode("utf-8")
+
+    @staticmethod
+    def simple_string_encode(value: str):
+        return f"{SIMPLE_STRING_IDENTIFIER}{value}\r\n".encode("utf-8")
 
     @staticmethod
     def array_encode(value: str | list[str]):
@@ -223,6 +227,11 @@ class RedisServer:
 
         if command == 'replconf':
             response = "OK"
+
+        if command == 'psync':
+            replication_id = GenerateRandomString(length=40).execute()
+            response = RESPEncoder.simple_string_encode(f"FULLRESYNC {replication_id} 0")
+
 
         return response
 
