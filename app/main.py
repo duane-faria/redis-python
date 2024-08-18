@@ -3,6 +3,7 @@ import socket
 import threading
 from collections.abc import Buffer
 from enum import Enum
+from os.path import split
 
 # constants
 ARRAY_IDENTIFIER: str = '*'
@@ -71,6 +72,14 @@ class RESPEncoder:
         length = len(value.encode("utf-8"))
         return f"{BULK_STRING_IDENTIFIER}{length}\r\n{value}\r\n".encode("utf-8")
 
+    @staticmethod
+    def array_encode(value: str | list):
+        if isinstance(value, str):
+            array_length = 1
+            return f"{ARRAY_IDENTIFIER}{array_length}{ENCODING_DIVIDER}${len(value)}{ENCODING_DIVIDER}{value}{ENCODING_DIVIDER}".encode("utf-8")
+        if isinstance(value, list):
+            pass
+
 class Store:
   data = {}
 
@@ -100,6 +109,15 @@ class RedisServer:
     def __init__(self, host: str, port: int, replica = None):
         self.server_socket = socket.create_server((host, port))
         self.replica = replica
+        self.is_replica = self.replica is not None
+        if self.is_replica:
+            self.hand_shake()
+
+    def hand_shake(self):
+        # sends a message to the master
+        host, port = self.replica.split()
+        connection = socket.create_connection((host,port))
+        connection.sendall(RESPEncoder.array_encode('PING'))
 
     def start(self ):
         while True:
@@ -162,10 +180,8 @@ class RedisServer:
 
             if _type == 'master':
                 response = RESPEncoder.bulk_string_encode("\r\n".join(string_list))
-            else:
+            else: # means it's a replica
                 response = RESPEncoder.bulk_string_encode(role_type)
-
-            print(response)
 
         return response
 
@@ -220,7 +236,7 @@ def main():
     cli_params = HandleCliParams().execute()
     port = cli_params['port'] or 6379
     replica = cli_params['replica'] # it means the redis server is a slave if filled
-    print('port', port, 'replica', replica)
+
     RedisServer(host='localhost', port=port, replica=replica).start()
 
 if __name__ == "__main__":
