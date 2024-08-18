@@ -221,6 +221,9 @@ class RedisServer:
             else: # means it's a replica
                 response = RESPEncoder.bulk_string_encode(role_type)
 
+        if command == 'replconf':
+            response = "OK"
+
         return response
 
     def _parse_payload(self, payload: list):
