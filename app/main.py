@@ -135,11 +135,17 @@ class RedisServer:
 
     def send_hand_shake(self):
         # sends messages to the master to configure the replica
+
+        def await_response():
+            self.master_socket_connection.recv(1024)
+
         self.master_socket_connection.sendall(RESPEncoder.array_encode('PING'))
-        self.master_socket_connection.recv(1024)
+        await_response()
         self.master_socket_connection.sendall(RESPEncoder.array_encode(['REPLCONF', 'listening-port', str(self.port)]))
-        self.master_socket_connection.recv(1024)
+        await_response()
         self.master_socket_connection.sendall(RESPEncoder.array_encode(['REPLCONF', 'capa', 'psync2']))
+        await_response()
+        self.master_socket_connection.sendall(RESPEncoder.array_encode(['PSYNC', '?', '-1']))
 
 
     def _handle_master_socket_messages(self, connection):
