@@ -186,7 +186,7 @@ class RedisServer:
                 ExecuteFunctionAfterXMilliSeconds.execute(milliseconds=int(params[Params.PX.value]), function=remove_item)
 
     def _get_response(self, command: str, payload: [str, None] = None) -> str:
-        response: None | bytes | str | Buffer = ''
+        response: None | bytes | str | Buffer | list = ''
 
         if command == 'ping':
             response = "PONG"
@@ -230,8 +230,12 @@ class RedisServer:
 
         if command == 'psync':
             replication_id = GenerateRandomString(length=40).execute()
-            response = RESPEncoder.simple_string_encode(f"FULLRESYNC {replication_id} 0")
+            response = [RESPEncoder.simple_string_encode(f"FULLRESYNC {replication_id} 0")]
 
+            rdb_hex = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2"
+            rdb_content = bytes.fromhex(rdb_hex)
+            rdb_length = f"${len(rdb_content)}\r\n".encode()
+            response.append(rdb_length + rdb_content)
 
         return response
 
@@ -251,8 +255,23 @@ class RedisServer:
                 print('payload', payload)
 
                 response = self._get_response(command, payload)
-                response = response if isinstance(response, bytes) else RESPEncoder.encode(response)
-                conn.send(response)
+                #response = response if isinstance(response, bytes) else RESPEncoder.encode(response)
+
+                def check_if_response_is_encoded(answer):
+                    return isinstance(answer, bytes)
+
+                def send_response(res): 
+                    print(res)
+                    if not check_if_response_is_encoded(res):
+                        conn.send(RESPEncoder.encode(res))
+                    else:
+                        conn.send(res)
+                        
+                if isinstance(response, list):
+                    for res in response:
+                        send_response(res)
+                else:                    
+                   send_response(response)
 
 
 class GenerateRandomString:
