@@ -1,11 +1,11 @@
 import socket
 import threading
 from enum import Enum
-from abc import ABC, abstractmethod
 
 from app.resp_handlers import RESPEncoder, RESPParser
 from app.utils import GenerateRandomString, ExecuteFunctionAfterXMilliSeconds
 from app.store import Store
+from app.commands import CommandFactory, load_commands
 
 class Params(Enum):
     PX = 'px' # expiry in milliseconds
@@ -28,8 +28,8 @@ class RedisServer:
         if self.is_replica:
             self.master_socket_connection = socket.create_connection((self.master['host'], self.master['port']))
             self.send_hand_shake()
-
-    def start(self ):
+    
+    def start(self):
         while True:
             conn, _ = self.server_socket.accept()
             threading.Thread(target=self._handle_client, args=(conn,)).start()
@@ -73,7 +73,7 @@ class RedisServer:
 
         return params
 
-    def _apply_params(self, params: [Params, str], command: str, payload: list[str]):
+    def _apply_params(self, params: Params, command: str, payload: list[str]):
         if Params.PX.value in params:
             if command == 'set':
                 key_value = payload[0]
@@ -135,137 +135,25 @@ class RedisServer:
 
         return response
 
-    def _parse_payload(self, payload: list):
-        return [item[1] for item in payload]
-
     def _handle_client(self, conn: socket.socket):
         with conn:
             while True:
                 encoded_message = conn.recv(1024)
-
                 command_and_payload = RESPParser(encoded_message.decode('utf-8')).parse()
-
-                command = list(command_and_payload[0])[1].lower()
-                payload = self._parse_payload(command_and_payload[1:]) or None
-                print('command', command)
+                
+                command_name = command_and_payload[0].lower()
+                payload = command_and_payload[1:] if len(command_and_payload[1]) > 0 else None
+                print('command', command_name)
                 print('payload', payload)
 
-                self.handle_command(command=command, payload=payload, connection=conn)
-                #response = response if isinstance(response, bytes) else RESPEncoder.encode(response)
+                command_factory = CommandFactory()
+                load_commands(command_factory)
+                this = self
+         
+                command = command_factory.get_command(command_name=command_name,  payload=payload, connection=conn, redis_server=this)
+                command.execute()      
+  
 
-                # def check_if_response_is_encoded(answer):
-                #     return isinstance(answer, bytes)
-
-                # def send_response(res): 
-                #     print(res)
-                #     if not check_if_response_is_encoded(res):
-                #         conn.send(RESPEncoder.encode(res))
-                #     else:
-                #         conn.send(res)
-                        
-                # if isinstance(response, list):
-                #     for res in response:
-                #         send_response(res)
-                # else:                    
-                #    send_response(response)
-
-
-class Command(ABC):
-    def __init__(self, payload: list[str] | None, connection: socket.socket = None, redis_server: RedisServer = None) -> None:
-        self.payload = payload
-        self.connection = connection
-        self.params = {}
-        self.redis_server = redis_server
-    
-    @abstractmethod
-    def execute(self):
-        pass
-    
-    def get_params(self):
-        if Params.PX.value in self.payload:
-            index = self.payload.index(Params.PX.value)
-            value = self.payload[index + 1]
-            self.params[Params.PX.value] = value
-
-        return self.params
-    
-    @abstractmethod
-    def apply_params(self):
-        pass
-        
-
-class PingCommand(Command):
-    def execute(self):
-        self.connection.send(RESPEncoder.encode('PONG'))
-        
-class EchoCommand(Command):
-    def execute(self):
-       self.connection.send(RESPEncoder.encode(self.payload[0]))
-
-class SetCommand(Command):
-    def execute(self):
-        key = self.payload[0]
-        value = self.payload[1]
-        Store.set_value(key, value)
-        params = self.get_params()
-
-        if len(params) > 0:
-            self.apply_params()
-
-        self.connection.send(RESPEncoder.encode('OK'))
-    
-    def apply_params(self):
-        key_value = self.payload[0]
-        remove_item = lambda: Store.delete_value(key_value)
-        # @TODO pass this class as a param, to make it easier to test
-        ExecuteFunctionAfterXMilliSeconds.execute(milliseconds=int(self.params[Params.PX.value]), function=remove_item)
-
-class GetCommand(Command):
-    def execute(self):
-        key = self.payload[0]
-        try:
-            response = Store.get_value(key)
-        except KeyError:
-            response = None
-        
-        self.connection.send(RESPEncoder.encode(response))
-        
-class InfoCommand(Command):
-    def execute(self):
-        replication_id = GenerateRandomString(length=40).execute()
-        role_type = f"role:{self.redis_server.server_type}"
-
-        string_list = [role_type, f"master_replid:{replication_id}", "master_repl_offset:0"]
-
-        if not self.redis_server.is_replica:
-            response = RESPEncoder.bulk_string_encode("\r\n".join(string_list))
-        else: # means it's a replica
-            response = RESPEncoder.bulk_string_encode(role_type)
-        
-        self.connection.send(response)
-        
-class ReplConfCommand(Command):
-    def execute(self):
-        self.connection.send(RESPEncoder.encode('OK'))
-
-class PsyncCommand(Command):
-    def execute(self):
-        replication_id = GenerateRandomString(length=40).execute()
-        response = [RESPEncoder.simple_string_encode(f"FULLRESYNC {replication_id} 0")]
-
-        rdb_hex = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d6269"
-        +"7473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2"
-        rdb_content = bytes.fromhex(rdb_hex)
-        rdb_length = f"${len(rdb_content)}\r\n".encode()
-        response.append(rdb_length + rdb_content)
-        self.connection.send(response)
-        
-class CommandFactory():
-    def __init__(self) -> None:
-        self.commands = {}
-    
-    def register_command():
-        pass
-    
-    def get_command():
-        pass
+# python3 -m app.main --port 6379 
+# printf '+PING\r\n' | nc localhost 6379
+# printf '*2\r\n$4\r\necho\r\n$5\r\nduane\r\n' | nc localhost 6379

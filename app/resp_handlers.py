@@ -20,16 +20,14 @@ class RESPParser:
 
     def _parse_array(self):
         broken_data = self.data.split('\r\n')
-        filtered_data = filter(self._filter_values, enumerate(broken_data))
-        tuple_list = list(filtered_data)
-        return tuple_list
+        filtered_data = [value for index, value in enumerate(broken_data) if self._filter_values(value, index)]
+        return filtered_data
 
     def _parse_simple_string(self):
         command = self.data.replace("\r\n", "")
-        return {command[1:], ''}
+        return [command[1:], '']
 
-    def _filter_values(self, tuple_list: tuple[int, str]) -> bool:
-        index, value = tuple_list
+    def _filter_values(self, value: str, index: int) -> bool:
         return index > 0 and len(value) > 0 and value[0] != '$'
     
     
@@ -72,4 +70,7 @@ class RESPEncoder:
                 items.append(f'{BULK_STRING_IDENTIFIER}{len(item)}')
                 items.append(item)
 
-            return f"{ARRAY_IDENTIFIER}{array_length}{ENCODING_DIVIDER}{ENCODING_DIVIDER.join(items)}{ENCODING_DIVIDER}".encode("utf-8")
+            return f"{ARRAY_IDENTIFIER}{array_length}{ENCODING_DIVIDER}{ENCODING_DIVIDER.join(items)}{ENCODING_DIVIDER}".encode("utf-8")      
+        
+
+#  python3 -m app.resp_handlers.py
