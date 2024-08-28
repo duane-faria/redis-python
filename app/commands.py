@@ -107,8 +107,7 @@ class PsyncCommand(Command):
         replication_id = GenerateRandomString(length=40).execute()
         response = [RESPEncoder.simple_string_encode(f"FULLRESYNC {replication_id} 0")]
 
-        rdb_hex = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d6269"
-        +"7473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2"
+        rdb_hex = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2"
         rdb_content = bytes.fromhex(rdb_hex)
         rdb_length = f"${len(rdb_content)}\r\n".encode()
         response.append(rdb_length + rdb_content)
@@ -129,11 +128,14 @@ class CommandFactory():
     
     
 def load_commands(command_factory: CommandFactory) -> CommandFactory:
-    """Registers commands with the given command factory and returns it."""
+    """Register commands with the given command factory and returns it."""
     command_factory.register_command('ping', PingCommand)
     command_factory.register_command('echo', EchoCommand)
     command_factory.register_command('set', SetCommand)
     command_factory.register_command('get', GetCommand)
+    command_factory.register_command('info', InfoCommand)
+    command_factory.register_command('replconf', ReplConfCommand)
+    command_factory.register_command('psync', PsyncCommand)
     
     return command_factory
         

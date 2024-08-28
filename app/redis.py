@@ -142,7 +142,7 @@ class RedisServer:
                 command_and_payload = RESPParser(encoded_message.decode('utf-8')).parse()
                 
                 command_name = command_and_payload[0].lower()
-                payload = command_and_payload[1:] if len(command_and_payload[1]) > 0 else None
+                payload = command_and_payload[1:] if len(command_and_payload) > 1 else None
                 print('command', command_name)
                 print('payload', payload)
 
