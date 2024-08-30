@@ -6,6 +6,7 @@ from typing import Protocol, Optional
 from app.resp_handlers import RESPEncoder
 from app.store import Store
 from app.utils import GenerateRandomString, ExecuteFunctionAfterXMilliSeconds
+from app.config import replicas
 
 class IRedisServer(Protocol):
     host: str
@@ -15,9 +16,13 @@ class IRedisServer(Protocol):
     is_replica: bool
     server_type: str
     master_socket_connection: Optional[socket.socket]
+    def replicate(self, data: any) -> None:
+        """Method to handle replication logic for the Redis server."""
+        pass
 
-class Params(Enum):
+class ParamsEnum(Enum):
     PX = 'px' # expiry in milliseconds
+    LISTENING_PORT = 'listening-port'
 
 class Command(ABC):
     def __init__(self, payload: list[str] | None, connection: socket.socket = None, redis_server: IRedisServer = None) -> None:
@@ -29,17 +34,24 @@ class Command(ABC):
     @abstractmethod
     def execute(self):
         pass
-    
-    def get_params(self):
-        if Params.PX.value in self.payload:
-            index = self.payload.index(Params.PX.value)
-            value = self.payload[index + 1]
-            self.params[Params.PX.value] = value
 
-        return self.params
-    
     def apply_params(self):
         pass
+
+    def _find_param_value(self, param):
+        index = self.payload.index(param)
+        value = self.payload[index + 1]
+        return value
+
+    def get_params(self):
+        if ParamsEnum.PX.value in self.payload:
+            value = self._find_param_value(ParamsEnum.PX.value)
+            self.params[ParamsEnum.PX.value] = value
+
+        if ParamsEnum.LISTENING_PORT.value in self.payload:
+           value = self._find_param_value(ParamsEnum.LISTENING_PORT.value)
+           self.params[ParamsEnum.LISTENING_PORT.value] = value
+        return self.params
         
 
 class PingCommand(Command):
@@ -68,7 +80,7 @@ class SetCommand(Command):
         key_value = self.payload[0]
         remove_item = lambda: Store.delete_value(key_value)
         # @TODO pass this class as a param, to make it easier to test
-        ExecuteFunctionAfterXMilliSeconds.execute(milliseconds=int(self.params[Params.PX.value]), function=remove_item)
+        ExecuteFunctionAfterXMilliSeconds.execute(milliseconds=int(self.params[ParamsEnum.PX.value]), function=remove_item)
         
 
 class GetCommand(Command):
@@ -111,19 +123,23 @@ class PsyncCommand(Command):
         rdb_content = bytes.fromhex(rdb_hex)
         rdb_length = f"${len(rdb_content)}\r\n".encode()
         response.append(rdb_length + rdb_content)
-        self.connection.send(response)
+        replicas.append(self.connection)
+
+        for res in response:
+            self.connection.send(res)
+
         
         
-class CommandFactory():
+class CommandFactory:
     def __init__(self) -> None:
         self.commands: dict[str, type[Command]] = {}
     
-    def register_command(self, command_name: str, command_class: Command):
+    def register_command(self, command_name: str, command_class: type[Command]):
         self.commands[command_name] = command_class
     
     def get_command(self, command_name: str, *args, **kwargs):
         command_class = self.commands.get(command_name)
-        print(command_name)
+
         return command_class(*args, **kwargs)
     
     
