@@ -1,0 +1,200 @@
+use this go encoder function to encode this value as a bulk string
+role:master
+master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb
+master_repl_offset:0
+
+package resp_encoder
+
+import (
+	"fmt"
+	"strconv"
+
+	resp_value "github.com/codecrafters-io/redis-tester/internal/resp/value"
+)
+
+func Encode(v resp_value.Value) []byte {
+	switch v.Type {
+	case resp_value.INTEGER:
+		return encodeInteger(v)
+	case resp_value.SIMPLE_STRING:
+		return encodeSimpleString(v)
+	case resp_value.BULK_STRING:
+		return encodeBulkString(v)
+	case resp_value.ERROR:
+		return encodeError(v)
+	case resp_value.ARRAY:
+		return encodeArray(v)
+	default:
+		panic(fmt.Sprintf("unsupported type: %v", v.Type))
+	}
+}
+
+func EncodeFullResyncRDBFile(fileContents []byte) []byte {
+	return []byte(fmt.Sprintf("$%d\r\n%s", len(fileContents), fileContents))
+}
+
+func encodeInteger(v resp_value.Value) []byte {
+	int_value, err := strconv.Atoi(v.String())
+	if err != nil {
+		panic(err) // We only expect valid values to be passed in
+	}
+
+	return []byte(fmt.Sprintf(":%d\r\n", int_value))
+}
+
+func encodeSimpleString(v resp_value.Value) []byte {
+	return []byte(fmt.Sprintf("+%s\r\n", v.String()))
+}
+
+func encodeBulkString(v resp_value.Value) []byte {
+	return []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(v.Bytes()), v.Bytes()))
+}
+
+func encodeError(v resp_value.Value) []byte {
+	return []byte(fmt.Sprintf("-%s\r\n", v.String()))
+}
+
+func encodeArray(v resp_value.Value) []byte {
+	res := []byte{}
+
+	for _, elem := range v.Array() {
+		res = append(res, Encode(elem)...)
+	}
+
+	return []byte(fmt.Sprintf("*%d\r\n%s", len(v.Array()), res))
+
+
+
+
+
+Estou resolvendo esse desafio de criar um redis usando python, porém travei nessa etapa
+
+In this stage, you'll add support for propagating write commands from a master to a single replica.
+
+Command propagation
+After the replication handshake is complete and the master has sent the RDB file to the replica, the master starts propagating commands to the replica.
+
+When a master receives a "write" command from a client, it propagates the command to the replica. The replica processes the command and updates its state. More on how this propagation works in the "Replication connection" section below.
+
+Commands like PING, ECHO etc. are not considered "write" commands, so they aren't propagated. Commands like SET, DEL etc. are considered "write" commands, so they are propagated.
+
+Replication connection
+Command propagation happens over the replication connection. This is the same connection that was used for the handshake.
+
+Propagated commands are sent as RESP arrays. For example, if the master receives SET foo bar as a command from a client, it'll send *3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n to all connected replicas over their respective replication connections.
+
+Replicas process commands received over the replication connection just like they would process commands received from a client, but with one difference: Replicas don't send responses back to the master. They just process the command silently and update their state.
+
+Similarly, the master doesn't wait for a response from the replica when propagating commands. It just keeps sending commands as they come in.
+
+There is one exception to this "no response" rule, the REPLCONF GETACK command. We'll learn about this in later stages.
+
+Tests
+The tester will execute your program like this:
+
+./your_program.sh --port <PORT>
+It'll then connect to your TCP server as a replica and execute the following commands:
+
+PING (expecting +PONG\r\n back)
+REPLCONF listening-port <PORT> (expecting +OK\r\n back)
+REPLCONF capa eof capa psync2 (expecting +OK\r\n back)
+PSYNC ? -1 (expecting +FULLRESYNC <REPL_ID> 0\r\n back)
+The tester will then wait for your server to send an RDB file.
+
+Once the RDB file is received, the tester will send series of write commands to your program (as a separate Redis client, not the replica).
+
+$ redis-cli SET foo 1
+$ redis-cli SET bar 2
+$ redis-cli SET baz 3
+It'll then assert that these commands were propagated to the replica, in order. The tester will expect to receive these commands (encoded as RESP arrays) on the replication connection (the one used for the handshake).
+
+Notes
+A true implementation would buffer the commands so that they can be sent to the replica after it loads the RDB file. For the purposes of this challenge, you can assume that the replica is ready to receive commands immediately after receiving the RDB file.
+
+para qual conexao que eu teria que propagar?
+
+minha classe de redis server
+
+import socket
+import threading
+from enum import Enum
+
+from app.resp_handlers import RESPEncoder, RESPParser
+from app.commands import CommandFactory, load_commands
+from app.config import replicas
+
+class Params(Enum):
+    PX = 'px' # expiry in milliseconds
+
+class CommandEnum(Enum):
+    PING = 'ping'
+
+class RedisServer:
+    def __init__(self, host: str, port: int, replica = None):
+        self.port = port
+        self.host = host
+        self.server_socket = socket.create_server((host, port))
+        self.master = {
+            'host': replica.split()[0],
+            'port': replica.split()[1]
+        } if replica is not None else None
+        self.is_replica = self.master is not None
+        self.server_type = 'slave' if self.is_replica else 'master'
+
+        if self.is_replica:
+            self.master_socket_connection = socket.create_connection((self.master['host'], self.master['port']))
+            replicas.append(self.master_socket_connection)
+            self.send_hand_shake()
+
+    def start(self):
+        while True:
+            conn, client_address = self.server_socket.accept()
+            threading.Thread(target=self._handle_client, args=(conn,client_address)).start()
+
+    def replicate(self, data: any):
+        print('replicate method')
+        print(replicas)
+        if not self.is_replica:
+            for repl in replicas:
+                repl.sendall(data)
+
+    def send_hand_shake(self):
+        # sends messages to the master to configure the replica
+
+        def await_response():
+            self.master_socket_connection.recv(1024)
+
+        self.master_socket_connection.sendall(RESPEncoder.array_encode('PING'))
+        await_response()
+        self.master_socket_connection.sendall(RESPEncoder.array_encode(['REPLCONF', 'listening-port', str(self.port)]))
+        await_response()
+        self.master_socket_connection.sendall(RESPEncoder.array_encode(['REPLCONF', 'capa', 'psync2']))
+        await_response()
+        self.master_socket_connection.sendall(RESPEncoder.array_encode(['PSYNC', '?', '-1']))
+
+    def _handle_client(self, conn: socket.socket, client_address):
+        with conn:
+            while True:
+                encoded_message = conn.recv(1024)
+                print(encoded_message, 'encoded message')
+                command_and_payload = RESPParser(encoded_message.decode('utf-8')).parse()
+                print(command_and_payload, 'command and payload')
+                command_name = command_and_payload[0].lower()
+                payload = command_and_payload[1:] if len(command_and_payload) > 1 else None
+                print('command', command_name)
+                print('payload', payload)
+                self.client_address = client_address
+
+                command_factory = CommandFactory()
+                load_commands(command_factory)
+                this = self
+
+                command = command_factory.get_command(command_name=command_name,  payload=payload,
+                                                      connection=conn, redis_server=this)
+                command.execute()
+
+
+# python3 -m pdb app.main --port 6379
+# printf '+PING\r\n' | nc localhost 6379
+# printf '*2\r\n$4\r\necho\r\n$5\r\nduane\r\n' | nc localhost 6379
+#printf *3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n | nc localhost 6379
