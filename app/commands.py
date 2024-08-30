@@ -44,13 +44,15 @@ class Command(ABC):
         return value
 
     def get_params(self):
-        if ParamsEnum.PX.value in self.payload:
-            value = self._find_param_value(ParamsEnum.PX.value)
-            self.params[ParamsEnum.PX.value] = value
+        params = [
+            ParamsEnum.PX.value,
+            ParamsEnum.LISTENING_PORT.value
+        ]
 
-        if ParamsEnum.LISTENING_PORT.value in self.payload:
-           value = self._find_param_value(ParamsEnum.LISTENING_PORT.value)
-           self.params[ParamsEnum.LISTENING_PORT.value] = value
+        for param in params:
+            if param in self.payload:
+                self.params[param] = self._find_param_value(param)
+
         return self.params
         
 
