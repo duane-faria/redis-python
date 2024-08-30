@@ -54,6 +54,9 @@ class Command(ABC):
                 self.params[param] = self._find_param_value(param)
 
         return self.params
+
+    def send(self, data: bytes):
+        self.connection.send(data)
         
 
 class PingCommand(Command):
