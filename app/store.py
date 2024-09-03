@@ -12,3 +12,7 @@ class Store:
   @staticmethod
   def delete_value(key):
     del Store.data[key]
+
+  @staticmethod
+  def get_values():
+    return Store.data
