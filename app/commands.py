@@ -1,12 +1,12 @@
 import socket
 from abc import ABC, abstractmethod
-from enum import Enum
 from typing import Protocol, Optional
 
 from app.resp_handlers import RESPEncoder
 from app.store import Store
 from app.utils import GenerateRandomString, ExecuteFunctionAfterXMilliSeconds
 from app.config import replicas
+from app.enums import ParamsEnum, CommandEnum
 
 class IRedisServer(Protocol):
     host: str
@@ -20,9 +20,8 @@ class IRedisServer(Protocol):
         """Method to handle replication logic for the Redis server."""
         pass
 
-class ParamsEnum(Enum):
-    PX = 'px' # expiry in milliseconds
-    LISTENING_PORT = 'listening-port'
+def is_master_socket(master_socket: socket.socket, client_socket: socket.socket):
+    return master_socket.getpeername() == client_socket.getpeername()
 
 class Command(ABC):
     def __init__(self, payload: list[str] | None, connection: socket.socket = None, redis_server: IRedisServer = None) -> None:
@@ -56,17 +55,21 @@ class Command(ABC):
         return self.params
 
     def send(self, data: bytes):
-        self.connection.send(data)
+      #  print(is_master_socket(self.redis_server.master_socket_connection, self.connection))
+        if self.redis_server.is_replica and is_master_socket(self.redis_server.master_socket_connection, self.connection):
+            return
+        
+        self.connection.sendall(data)
         
 
 class PingCommand(Command):
     def execute(self):
-        self.connection.send(RESPEncoder.encode('PONG'))
+        return self.send(RESPEncoder.encode('PONG'))
         
         
 class EchoCommand(Command):
     def execute(self):
-       self.connection.send(RESPEncoder.encode(self.payload[0]))
+       self.send(RESPEncoder.encode(self.payload[0]))
        
 
 class SetCommand(Command):
@@ -79,7 +82,7 @@ class SetCommand(Command):
         if len(params) > 0:
             self.apply_params()
 
-        self.connection.send(RESPEncoder.encode('OK'))
+        self.send(RESPEncoder.encode('OK'))
     
     def apply_params(self):
         key_value = self.payload[0]
@@ -96,7 +99,7 @@ class GetCommand(Command):
         except KeyError:
             response = None
         
-        self.connection.send(RESPEncoder.encode(response))
+        self.send(RESPEncoder.encode(response))
         
         
 class InfoCommand(Command):
@@ -111,12 +114,12 @@ class InfoCommand(Command):
         else: # means it's a replica
             response = RESPEncoder.bulk_string_encode(role_type)
         
-        self.connection.send(response)
+        self.send(response)
         
         
 class ReplConfCommand(Command):
     def execute(self):
-        self.connection.send(RESPEncoder.encode('OK'))
+        self.send(RESPEncoder.encode('OK'))
         
 
 class PsyncCommand(Command):
@@ -131,7 +134,7 @@ class PsyncCommand(Command):
         replicas.append(self.connection)
 
         for res in response:
-            self.connection.send(res)
+            self.send(res)
 
         
         
@@ -150,13 +153,13 @@ class CommandFactory:
     
 def load_commands(command_factory: CommandFactory) -> CommandFactory:
     """Register commands with the given command factory and returns it."""
-    command_factory.register_command('ping', PingCommand)
-    command_factory.register_command('echo', EchoCommand)
-    command_factory.register_command('set', SetCommand)
-    command_factory.register_command('get', GetCommand)
-    command_factory.register_command('info', InfoCommand)
-    command_factory.register_command('replconf', ReplConfCommand)
-    command_factory.register_command('psync', PsyncCommand)
+    command_factory.register_command(CommandEnum.PING.value, PingCommand)
+    command_factory.register_command(CommandEnum.ECHO.value, EchoCommand)
+    command_factory.register_command(CommandEnum.GET.value, GetCommand)
+    command_factory.register_command(CommandEnum.SET.value, SetCommand)
+    command_factory.register_command(CommandEnum.INFO.value, InfoCommand)
+    command_factory.register_command(CommandEnum.REPLCONF.value, ReplConfCommand)
+    command_factory.register_command(CommandEnum.PSYNC.value, PsyncCommand)
     
     return command_factory
         

@@ -6,17 +6,12 @@ from app.resp_handlers import RESPEncoder, RESPParser
 from app.commands import CommandFactory, load_commands
 from app.config import replicas
 
-class Params(Enum):
-    PX = 'px' # expiry in milliseconds
-    
-class CommandEnum(Enum): 
-    PING = 'ping'          
-
 class RedisServer:
     def __init__(self, host: str, port: int, replica = None):
         self.port = port
         self.host = host
         self.server_socket = socket.create_server((host, port))
+
         self.master = {
             'host': replica.split()[0],
             'port': replica.split()[1]
@@ -26,7 +21,11 @@ class RedisServer:
 
         if self.is_replica:
             self.master_socket_connection = socket.create_connection((self.master['host'], self.master['port']))
+            print(dir(self.master_socket_connection))
+            print(self.master_socket_connection.getsockname())
             self.send_hand_shake()
+
+        print('')
     
     def start(self):
         while True:
@@ -34,6 +33,7 @@ class RedisServer:
             threading.Thread(target=self._handle_client, args=(conn,client_address)).start()
 
     def replicate(self, data: any):
+        print('replicating...')
         for repl in replicas:
             repl.sendall(data)
 
@@ -51,10 +51,10 @@ class RedisServer:
         await_response()
         self.master_socket_connection.sendall(RESPEncoder.array_encode(['PSYNC', '?', '-1']))
 
-    def _handle_client(self, conn: socket.socket, client_address):
-        with conn:
+    def _handle_client(self, client_socket: socket.socket, client_address):
+        with client_socket:
             while True:
-                encoded_message = conn.recv(1024)
+                encoded_message = client_socket.recv(1024)
                 if encoded_message == b'':
                     return
 
@@ -68,11 +68,12 @@ class RedisServer:
                 load_commands(command_factory)
                 this = self
          
-                command = command_factory.get_command(command_name=command_name,  payload=payload,
-                                                      connection=conn, redis_server=this)
+                command = command_factory.get_command(command_name=command_name, payload=payload,
+                                                      connection=client_socket, redis_server=this)
                 command.execute()
-
+                print('command acabou de ser executado, é replica:', self.is_replica)
                 if not self.is_replica and command_name in ['set', 'del']:
+                    print('caiu no if do master replica')
                     payload_to_replicate = RESPEncoder.array_encode(command_and_payload)
                     self.replicate(payload_to_replicate)
   
