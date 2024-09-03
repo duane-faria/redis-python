@@ -4,8 +4,8 @@ BULK_STRING_IDENTIFIER: str = '$'
 ENCODING_DIVIDER="\r\n"
 
 class RESPParser:
-    def __init__(self, data):
-        self.data = data
+    def __init__(self, data: bytes):
+        self.data = data.decode('utf-8')
     
     def parse(self):
         data_identifier = self.data[0]

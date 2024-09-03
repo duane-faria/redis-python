@@ -1,6 +1,5 @@
 import socket
 import threading
-from enum import Enum
 
 from app.resp_handlers import RESPEncoder, RESPParser
 from app.commands import CommandFactory, load_commands
@@ -21,16 +20,33 @@ class RedisServer:
 
         if self.is_replica:
             self.master_socket_connection = socket.create_connection((self.master['host'], self.master['port']))
-            print(dir(self.master_socket_connection))
-            print(self.master_socket_connection.getsockname())
             self.send_hand_shake()
+            #threading.Thread(target=self.listen_to_master, args=(self.master_socket_connection,), daemon=True).start()
 
-        print('')
-    
+        print('redis server started\n', 'is replica: ', self.is_replica)
+
+    def listen_to_master(self, master_connection):
+        def is_utf8_encoded(data: bytes) -> bool:
+            try:
+                data.decode('utf-8')
+                return True
+            except UnicodeDecodeError:
+                return False
+
+        while True:
+            encoded_message = master_connection.recv(1024)
+            print('listen_to_master', encoded_message)
+            if encoded_message == b'' or not is_utf8_encoded(encoded_message):
+                return
+            print(encoded_message)
+            message = RESPParser(encoded_message).parse()
+
+            print('data coming from master', message)
+
     def start(self):
         while True:
             conn, client_address = self.server_socket.accept()
-            threading.Thread(target=self._handle_client, args=(conn,client_address)).start()
+            threading.Thread(target=self._handle_client, args=(conn,client_address), daemon=True).start()
 
     def replicate(self, data: any):
         print('replicating...')
@@ -39,7 +55,7 @@ class RedisServer:
 
     def send_hand_shake(self):
         # sends messages to the master to configure the replica
-
+        print('hand shake')
         def await_response():
             self.master_socket_connection.recv(1024)
 
@@ -50,6 +66,9 @@ class RedisServer:
         self.master_socket_connection.sendall(RESPEncoder.array_encode(['REPLCONF', 'capa', 'psync2']))
         await_response()
         self.master_socket_connection.sendall(RESPEncoder.array_encode(['PSYNC', '?', '-1']))
+        await_response()
+        while True:
+            threading.Thread(target=self.listen_to_master, args=(self.master_socket_connection,), daemon=True).start()
 
     def _handle_client(self, client_socket: socket.socket, client_address):
         with client_socket:
@@ -58,7 +77,7 @@ class RedisServer:
                 if encoded_message == b'':
                     return
 
-                command_and_payload = RESPParser(encoded_message.decode('utf-8')).parse()
+                command_and_payload = RESPParser(encoded_message).parse()
                 command_name = command_and_payload[0].lower()
                 payload = command_and_payload[1:] if len(command_and_payload) > 1 else None
                 print('command', command_name)
@@ -71,9 +90,8 @@ class RedisServer:
                 command = command_factory.get_command(command_name=command_name, payload=payload,
                                                       connection=client_socket, redis_server=this)
                 command.execute()
-                print('command acabou de ser executado, é replica:', self.is_replica)
+
                 if not self.is_replica and command_name in ['set', 'del']:
-                    print('caiu no if do master replica')
                     payload_to_replicate = RESPEncoder.array_encode(command_and_payload)
                     self.replicate(payload_to_replicate)
   
