@@ -1,9 +1,9 @@
 import socket
 import threading
 
-from app.resp_handlers import RESPEncoder, RESPParser
-from app.commands import CommandFactory, load_commands
+from app.resp_handlers import RESPEncoder
 from app.config import replicas
+from app.socket_message_handler import SocketMessage
 
 class RedisServer:
     def __init__(self, host: str, port: int, replica = None):
@@ -26,22 +26,16 @@ class RedisServer:
         print('redis server started\n', 'is replica: ', self.is_replica)
 
     def listen_to_master(self, master_connection):
-        def is_utf8_encoded(data: bytes) -> bool:
-            try:
-                data.decode('utf-8')
-                return True
-            except UnicodeDecodeError:
-                return False
-
         while True:
+            socket_message = SocketMessage(
+                socket_connection=self.master_socket_connection,
+                server_instance=self,
+                is_master=True
+            )
+
             encoded_message = master_connection.recv(1024)
             print('listen_to_master', encoded_message)
-            if encoded_message == b'' or not is_utf8_encoded(encoded_message):
-                return
-            print(encoded_message)
-            message = RESPParser(encoded_message).parse()
-
-            print('data coming from master', message)
+            socket_message.execute(encoded_message)
 
     def start(self):
         while True:
@@ -67,29 +61,21 @@ class RedisServer:
         await_response()
         self.master_socket_connection.sendall(RESPEncoder.array_encode(['PSYNC', '?', '-1']))
         await_response()
-        while True:
-            threading.Thread(target=self.listen_to_master, args=(self.master_socket_connection,), daemon=True).start()
+        threading.Thread(target=self.listen_to_master, args=(self.master_socket_connection,), daemon=True).start()
 
     def _handle_client(self, client_socket: socket.socket, client_address):
         with client_socket:
             while True:
                 encoded_message = client_socket.recv(1024)
-                if encoded_message == b'':
-                    return
+                socket_message = SocketMessage(
+                    socket_connection=self.master_socket_connection,
+                    server_instance=self
+                )
 
-                command_and_payload = RESPParser(encoded_message).parse()
-                command_name = command_and_payload[0].lower()
-                payload = command_and_payload[1:] if len(command_and_payload) > 1 else None
-                print('command', command_name)
-                print('payload', payload)
-
-                command_factory = CommandFactory()
-                load_commands(command_factory)
-                this = self
-         
-                command = command_factory.get_command(command_name=command_name, payload=payload,
-                                                      connection=client_socket, redis_server=this)
-                command.execute()
+                socket_message.execute(encoded_message)
+                command_name = socket_message.command_config.name
+                command_payload = socket_message.command_config.payload
+                command_and_payload = [command_name, *command_payload]
 
                 if not self.is_replica and command_name in ['set', 'del']:
                     payload_to_replicate = RESPEncoder.array_encode(command_and_payload)
