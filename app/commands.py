@@ -2,6 +2,7 @@ import socket
 from abc import ABC, abstractmethod
 from typing import Protocol, Optional
 
+from app.entities import CommandConfig
 from app.resp_handlers import RESPEncoder
 from app.store import Store
 from app.utils import GenerateRandomString, ExecuteFunctionAfterXMilliSeconds
@@ -24,14 +25,14 @@ def is_master_socket(master_socket: socket.socket, client_socket: socket.socket)
     return master_socket.getpeername() == client_socket.getpeername()
 
 class Command(ABC):
-    def __init__(self, payload: list[str] | None, connection: socket.socket = None, redis_server: IRedisServer = None) -> None:
-        self.payload = payload
-        self.connection = connection
+    def __init__(self, command_config: CommandConfig) -> None:
+        self.payload = command_config.payload
+        self.connection = command_config.socket_connection
         self.params = {}
-        self.redis_server = redis_server
-    
+        self.redis_server = command_config.server_instance
+
     @abstractmethod
-    def execute(self):
+    def execute(self) -> None:
         pass
 
     def apply_params(self):
@@ -55,16 +56,15 @@ class Command(ABC):
         return self.params
 
     def send(self, data: bytes):
-        if self.redis_server.is_replica and is_master_socket(self.redis_server.master_socket_connection, self.connection):
-            print('no response')
-            return
-        
         self.connection.sendall(data)
-        
+      #  if self.redis_server.is_replica and is_master_socket(self.redis_server.master_socket_connection, self.connection):
+         #   print('no response')
+        #    return
+
 
 class PingCommand(Command):
     def execute(self):
-        return self.send(RESPEncoder.encode('PONG'))
+        self.send(RESPEncoder.encode('PONG'))
         
         
 class EchoCommand(Command):
@@ -146,14 +146,14 @@ class CommandFactory:
     def register_command(self, command_name: str, command_class: type[Command]):
         self.commands[command_name] = command_class
     
-    def get_command(self, command_name: str, *args, **kwargs):
-        command_class = self.commands.get(command_name)
+    def get_command(self, command_config: CommandConfig):
+        command_class = self.commands.get(command_config.name)
 
-        return command_class(*args, **kwargs)
+        return command_class(command_config=command_config)
     
     
 def load_commands(command_factory: CommandFactory) -> CommandFactory:
-    """Register commands with the given command factory and returns it."""
+    """Register command with the given command factory and returns it."""
     command_factory.register_command(CommandEnum.PING.value, PingCommand)
     command_factory.register_command(CommandEnum.ECHO.value, EchoCommand)
     command_factory.register_command(CommandEnum.GET.value, GetCommand)
