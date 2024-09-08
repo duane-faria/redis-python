@@ -6,7 +6,7 @@
 #
 # Learn more: https://codecrafters.io/program-interface
 
-set -e # Exit early if any commands fail
+set -e # Exit early if any command fail
 
 # Copied from .codecrafters/run.sh
 #
