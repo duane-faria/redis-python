@@ -21,7 +21,6 @@ class RESPParser:
             if not has_multiple_arrays:
                 response = self._parse_array()
             else:
-                print('caiu no else do array')
                 exclude_list = [ARRAY_IDENTIFIER, BULK_STRING_IDENTIFIER]
                 elements: list[str] = self.data.split('\r\n')
                 message_elements = []
@@ -41,7 +40,7 @@ class RESPParser:
 
                 message_elements.append(sub_list)
                 response = message_elements
-                print(response)
+
         if data_identifier == SIMPLE_STRING_IDENTIFIER:
            response = self._parse_simple_string()
 

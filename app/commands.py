@@ -57,10 +57,6 @@ class Command(ABC):
 
     def send(self, data: bytes):
         self.connection.sendall(data)
-      #  if self.redis_server.is_replica and is_master_socket(self.redis_server.master_socket_connection, self.connection):
-         #   print('no response')
-        #    return
-
 
 class PingCommand(Command):
     def execute(self):
@@ -78,10 +74,10 @@ class SetCommand(Command):
         value = self.payload[1]
         Store.set_value(key, value)
         params = self.get_params()
-        print('chamou set')
+
         if len(params) > 0:
             self.apply_params()
-        print(Store.get_values())
+
         self.send(RESPEncoder.encode('OK'))
     
     def apply_params(self):
@@ -94,7 +90,7 @@ class SetCommand(Command):
 class GetCommand(Command):
     def execute(self):
         key = self.payload[0]
-        print('get command', Store.get_values())
+        print('store values: ',Store.get_values())
         try:
             response = Store.get_value(key)
         except KeyError:

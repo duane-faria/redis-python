@@ -19,8 +19,7 @@ class SocketMessage:
         self.is_master = is_master
 
     def _run_command(self, command_and_payload: list):
-        print('_run_command')
-        print(command_and_payload, 'command_and_payload')
+        print('executing command...')
         command_name = command_and_payload[0].lower()
         payload = command_and_payload[1:] if len(command_and_payload) > 1 else None
 
@@ -43,6 +42,7 @@ class SocketMessage:
         command_processor.execute()
 
     def execute(self, encoded_message: bytes) -> None:
+        print('decoding message...')
         if encoded_message == b'' or not is_utf8_encoded(encoded_message):
             return
 

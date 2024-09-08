@@ -27,20 +27,32 @@ class RedisServer:
 
     def listen_to_master(self, master_connection):
         while True:
-            socket_message = SocketMessage(
-                socket_connection=self.master_socket_connection,
-                server_instance=self,
-                is_master=True
-            )
+            try:
+                socket_message = SocketMessage(
+                    socket_connection=master_connection,
+                    server_instance=self,
+                    is_master=True
+                )
 
-            encoded_message = master_connection.recv(1024)
-            print('listen_to_master', encoded_message)
-            socket_message.execute(encoded_message)
+                encoded_message = master_connection.recv(1024)
+                print('listen_to_master', encoded_message, '\n')
+                socket_message.execute(encoded_message)
+            except ConnectionResetError:
+                print("Connection to master was reset.")
+                break
+
+            except socket.error as e:
+                print(f"Socket error: {e}")
+                break
+
+            except Exception as e:
+                print(f"Error while listening to master: {e}")
+                break
 
     def start(self):
         while True:
             conn, client_address = self.server_socket.accept()
-            threading.Thread(target=self._handle_client, args=(conn,client_address), daemon=True).start()
+            threading.Thread(target=self._handle_client, args=(conn,client_address)).start()
 
     def replicate(self, data: any):
         print('replicating...')
@@ -68,14 +80,14 @@ class RedisServer:
             while True:
                 encoded_message = client_socket.recv(1024)
                 socket_message = SocketMessage(
-                    socket_connection=self.master_socket_connection,
+                    socket_connection=client_socket,
                     server_instance=self
                 )
 
                 socket_message.execute(encoded_message)
                 command_name = socket_message.command_config.name
                 command_payload = socket_message.command_config.payload
-                command_and_payload = [command_name, *command_payload]
+                command_and_payload = [command_name, *(command_payload if command_payload else '')]
 
                 if not self.is_replica and command_name in ['set', 'del']:
                     payload_to_replicate = RESPEncoder.array_encode(command_and_payload)
