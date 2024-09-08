@@ -1,4 +1,4 @@
-from app.commands import CommandFactory, load_commands
+from app.commands.command_factory import CommandFactory, load_commands
 from app.entities import CommandConfig
 
 class CommandProcessor:

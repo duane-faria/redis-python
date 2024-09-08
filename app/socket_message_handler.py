@@ -1,6 +1,6 @@
 import socket
 
-from app.command import CommandProcessor
+from app.commands import CommandProcessor
 from app.entities import CommandConfig
 from app.resp_handlers import RESPParser
 
@@ -19,7 +19,7 @@ class SocketMessage:
         self.is_master = is_master
 
     def _run_command(self, command_and_payload: list):
-        print('executing command...')
+        print('executing commands...')
         command_name = command_and_payload[0].lower()
         payload = command_and_payload[1:] if len(command_and_payload) > 1 else None
 
@@ -33,7 +33,7 @@ class SocketMessage:
             server_instance=self.server_instance,
             is_master=self.is_master
         )
-        print('command', command_name)
+        print('commands', command_name)
         print('payload', payload)
 
         command_processor = CommandProcessor(
